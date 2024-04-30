@@ -77,6 +77,9 @@ class SendgridTransport extends AbstractTransport implements Stringable
 
         $data = $this->setParameters($email, $data);
 
+        // Convert any inlined attachments to embedded images
+        $data = $this->processEmbeddedImages($email, $data);
+
         $payload = [
             'headers' => [
                 'Authorization' => 'Bearer ' . $this->apiKey,
@@ -287,5 +290,37 @@ class SendgridTransport extends AbstractTransport implements Stringable
     public function __toString(): string
     {
         return 'sendgrid';
+    }
+
+    protected function processEmbeddedImages($email, $data)
+    {
+        // Since this operates on a delayed email object, any inline images
+        // Will already be embedded using cid: strings.  So we need to match up
+        // Each inline cid with the attachments, and update the attachment to be
+        // Inlined
+        
+        // Process all current content parts
+        foreach($data['content'] as $content) {
+            // Look for images in HTML parts
+            if ($content['type'] && $content['type'] == 'text/html') {
+                // Find inline image placeholders with embedded CID references
+                preg_match_all('/<img.*?src=["\']cid:(.*?)["\'].*?>/i', $content['value'], $matches);
+
+                foreach ($matches[1] as $contentId) {
+                    // Lookup this CID in attachments
+                    foreach ($data['attachments'] as $attachmentIndex => $attachment) {
+                    
+                        // If we found the content id as an attachment, we update the attachment to be inline and reset
+                        // The content id to match the image cid from img src tag
+                        if ($contentId == $attachment['filename']) {
+                            // Add the image data to the content with the generated content ID
+                            $data['attachments'][$attachmentIndex]['disposition'] = 'inline';
+                            $data['attachments'][$attachmentIndex]['content_id'] = $contentId;
+                        }
+                    }
+                }
+            }
+        }
+        return $data;
     }
 }
